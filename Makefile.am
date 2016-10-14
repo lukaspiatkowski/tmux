@@ -6,8 +6,8 @@ CLEANFILES = tmux.1.mdoc tmux.1.man
 
 # Distribution tarball options.
 EXTRA_DIST = \
-	CHANGES FAQ README TODO COPYING examples compat/*.[ch] \
-	array.h compat.h tmux.h osdep-*.c mdoc2man.awk tmux.1
+	CHANGES FAQ README TODO COPYING example_tmux.conf compat/*.[ch] \
+	compat.h tmux.h osdep-*.c xmalloc.h mdoc2man.awk tmux.1
 dist-hook:
 	make clean
 	grep "^#found_debug=" configure
@@ -26,7 +26,7 @@ if IS_GCC
 CFLAGS += -std=gnu99 -O2
 if IS_DEBUG
 CFLAGS += -g
-CFLAGS += -Wno-long-long -Wall -W -Wnested-externs -Wformat=2
+CFLAGS += -Wno-long-long -Wall -W -Wformat=2
 CFLAGS += -Wmissing-prototypes -Wstrict-prototypes -Wmissing-declarations
 CFLAGS += -Wwrite-strings -Wshadow -Wpointer-arith -Wsign-compare
 CFLAGS += -Wundef -Wbad-function-cast -Winline -Wcast-align
@@ -36,6 +36,10 @@ endif
 if IS_COVERAGE
 CFLAGS += -g -O0 --coverage
 LDFLAGS += --coverage
+endif
+if IS_PROFILE
+CFLAGS += -g -O0 -pg
+LDFLAGS += -pg
 endif
 CPPFLAGS += -iquote.
 endif
@@ -54,9 +58,14 @@ if IS_SUNCC
 CFLAGS += -erroff=E_EMPTY_DECLARATION
 endif
 
-# Set _LINUX_SOURCE_COMPAT for AIX for mallocing 0 bytes
+# Set _LINUX_SOURCE_COMPAT for AIX for malloc(0).
 if IS_AIX
 DEFS += -D_LINUX_SOURCE_COMPAT=1
+endif
+
+# Set flags for NetBSD.
+if IS_NETBSD
+CPPFLAGS += -D_OPENBSD_SOURCE
 endif
 
 # List of sources.
@@ -181,7 +190,12 @@ dist_tmux_SOURCES = \
 	xterm-keys.c
 nodist_tmux_SOURCES = osdep-@PLATFORM@.c
 
-# Pile in all the compat/ stuff that is needed.
+# Add compat file for utf8proc.
+if HAVE_UTF8PROC
+nodist_tmux_SOURCES += compat/utf8proc.c
+endif
+
+# Add compat for missing or broken functions.
 if NO_FORKPTY
 nodist_tmux_SOURCES += compat/forkpty-@PLATFORM@.c
 endif
@@ -193,6 +207,12 @@ nodist_tmux_SOURCES += compat/closefrom.c
 endif
 if NO_DAEMON
 nodist_tmux_SOURCES += compat/daemon.c
+endif
+if NO_GETPROGNAME
+nodist_tmux_SOURCES += compat/getprogname.c
+endif
+if NO_SETPROCTITLE
+nodist_tmux_SOURCES += compat/setproctitle.c
 endif
 if NO_SETENV
 nodist_tmux_SOURCES += compat/setenv.c
@@ -232,9 +252,6 @@ nodist_tmux_SOURCES += compat/b64_ntop.c
 endif
 if NO_CFMAKERAW
 nodist_tmux_SOURCES += compat/cfmakeraw.c
-endif
-if NO_OPENAT
-nodist_tmux_SOURCES += compat/openat.c
 endif
 if NO_REALLOCARRAY
 nodist_tmux_SOURCES += compat/reallocarray.c

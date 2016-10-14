@@ -23,6 +23,8 @@
 #include <errno.h>
 #include <event.h>
 #include <fcntl.h>
+#include <getopt.h>
+#include <langinfo.h>
 #include <locale.h>
 #include <pwd.h>
 #include <stdlib.h>
@@ -31,10 +33,6 @@
 #include <unistd.h>
 
 #include "tmux.h"
-
-#if defined(DEBUG) && defined(__OpenBSD__)
-extern char	*malloc_options;
-#endif
 
 struct options	*global_options;	/* server options */
 struct options	*global_s_options;	/* session options */
@@ -45,24 +43,23 @@ struct hooks	*global_hooks;
 struct timeval	 start_time;
 const char	*socket_path;
 
-__dead void	 usage(void);
-static char	*make_label(const char *);
+static __dead void	 usage(void);
+static char		*make_label(const char *);
 
-#ifndef HAVE___PROGNAME
-char      *__progname = (char *) "tmux";
-#endif
+static const char	*getshell(void);
+static int		 checkshell(const char *);
 
-__dead void
+static __dead void
 usage(void)
 {
 	fprintf(stderr,
 	    "usage: %s [-2CluvV] [-c shell-command] [-f file] [-L socket-name]\n"
 	    "            [-S socket-path] [command [flags]]\n",
-	    __progname);
+	    getprogname());
 	exit(1);
 }
 
-const char *
+static const char *
 getshell(void)
 {
 	struct passwd	*pw;
@@ -79,7 +76,7 @@ getshell(void)
 	return (_PATH_BSHELL);
 }
 
-int
+static int
 checkshell(const char *shell)
 {
 	if (shell == NULL || *shell == '\0' || *shell != '/')
@@ -100,7 +97,7 @@ areshell(const char *shell)
 		ptr++;
 	else
 		ptr = shell;
-	progname = __progname;
+	progname = getprogname();
 	if (*progname == '-')
 		progname++;
 	if (strcmp(ptr, progname) == 0)
@@ -194,9 +191,13 @@ main(int argc, char **argv)
 	const char	*s;
 	int		 opt, flags, keys;
 
-#if defined(DEBUG) && defined(__OpenBSD__)
-	malloc_options = (char *) "AFGJPX";
-#endif
+	if (setlocale(LC_CTYPE, "en_US.UTF-8") == NULL) {
+		if (setlocale(LC_CTYPE, "") == NULL)
+			errx(1, "invalid LC_ALL, LC_CTYPE or LANG");
+		s = nl_langinfo(CODESET);
+		if (strcasecmp(s, "UTF-8") != 0 && strcasecmp(s, "UTF8") != 0)
+			errx(1, "need UTF-8 locale (LC_CTYPE) but have %s", s);
+	}
 
 	setlocale(LC_TIME, "");
 	tzset();
@@ -223,7 +224,7 @@ main(int argc, char **argv)
 				flags |= CLIENT_CONTROL;
 			break;
 		case 'V':
-			printf("%s %s\n", __progname, VERSION);
+			printf("%s %s\n", getprogname(), VERSION);
 			exit(0);
 		case 'f':
 			set_cfg_file(optarg);
@@ -335,5 +336,5 @@ main(int argc, char **argv)
 	free(label);
 
 	/* Pass control to the client. */
-	exit(client_main(event_init(), argc, argv, flags, shellcmd));
+	exit(client_main(osdep_event_init(), argc, argv, flags, shellcmd));
 }

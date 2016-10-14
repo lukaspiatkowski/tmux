@@ -26,22 +26,22 @@
  * Unbind key from command.
  */
 
-enum cmd_retval	cmd_unbind_key_exec(struct cmd *, struct cmd_q *);
-enum cmd_retval	cmd_unbind_key_mode_table(struct cmd *, struct cmd_q *,
-		    key_code);
+static enum cmd_retval	cmd_unbind_key_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	cmd_unbind_key_mode_table(struct cmd *, struct cmd_q *,
+			    key_code);
 
 const struct cmd_entry cmd_unbind_key_entry = {
 	.name = "unbind-key",
 	.alias = "unbind",
 
-	.args = { "acnt:T:", 0, 1 },
-	.usage = "[-acn] [-t mode-table] [-T key-table] key",
+	.args = { "ant:T:", 0, 1 },
+	.usage = "[-an] [-t mode-table] [-T key-table] key",
 
 	.flags = 0,
 	.exec = cmd_unbind_key_exec
 };
 
-enum cmd_retval
+static enum cmd_retval
 cmd_unbind_key_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args	*args = self->args;
@@ -98,7 +98,7 @@ cmd_unbind_key_exec(struct cmd *self, struct cmd_q *cmdq)
 	return (CMD_RETURN_NORMAL);
 }
 
-enum cmd_retval
+static enum cmd_retval
 cmd_unbind_key_mode_table(struct cmd *self, struct cmd_q *cmdq, key_code key)
 {
 	struct args			*args = self->args;
@@ -122,7 +122,6 @@ cmd_unbind_key_mode_table(struct cmd *self, struct cmd_q *cmdq, key_code key)
 	}
 
 	mtmp.key = key;
-	mtmp.mode = !!args_has(args, 'c');
 	if ((mbind = RB_FIND(mode_key_tree, mtab->tree, &mtmp)) != NULL) {
 		RB_REMOVE(mode_key_tree, mtab->tree, mbind);
 		free(mbind);

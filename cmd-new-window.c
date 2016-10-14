@@ -32,7 +32,7 @@
 
 #define NEW_WINDOW_TEMPLATE "#{session_name}:#{window_index}.#{pane_index}"
 
-enum cmd_retval	cmd_new_window_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	cmd_new_window_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_new_window_entry = {
 	.name = "new-window",
@@ -48,7 +48,7 @@ const struct cmd_entry cmd_new_window_entry = {
 	.exec = cmd_new_window_exec
 };
 
-enum cmd_retval
+static enum cmd_retval
 cmd_new_window_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args		*args = self->args;
@@ -61,6 +61,7 @@ cmd_new_window_exec(struct cmd *self, struct cmd_q *cmdq)
 	int			 argc, detached;
 	struct format_tree	*ft;
 	struct environ_entry	*envent;
+	struct cmd_find_state	 fs;
 
 	if (args_has(args, 'a')) {
 		if ((idx = winlink_shuffle_up(s, wl)) == -1) {
@@ -154,6 +155,10 @@ cmd_new_window_exec(struct cmd *self, struct cmd_q *cmdq)
 
 	if (to_free != NULL)
 		free((void *)to_free);
+
+	cmd_find_from_winlink(&fs, s, wl);
+	if (hooks_wait(s->hooks, cmdq, &fs, "after-new-window") == 0)
+		return (CMD_RETURN_WAIT);
 	return (CMD_RETURN_NORMAL);
 
 error:

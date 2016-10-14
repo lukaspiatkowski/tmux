@@ -22,30 +22,34 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "array.h"
 #include "tmux.h"
 
-struct screen *window_choose_init(struct window_pane *);
-void	window_choose_free(struct window_pane *);
-void	window_choose_resize(struct window_pane *, u_int, u_int);
-void	window_choose_key(struct window_pane *, struct client *,
-	    struct session *, key_code, struct mouse_event *);
+static struct screen *window_choose_init(struct window_pane *);
+static void	window_choose_free(struct window_pane *);
+static void	window_choose_resize(struct window_pane *, u_int, u_int);
+static void	window_choose_key(struct window_pane *, struct client *,
+		    struct session *, key_code, struct mouse_event *);
 
-void	window_choose_default_callback(struct window_choose_data *);
-struct window_choose_mode_item *window_choose_get_item(struct window_pane *,
-	    key_code, struct mouse_event *);
+static void	window_choose_default_callback(struct window_choose_data *);
+static struct window_choose_mode_item *window_choose_get_item(
+		    struct window_pane *, key_code, struct mouse_event *);
 
-void	window_choose_fire_callback(struct window_pane *,
-	    struct window_choose_data *);
-void	window_choose_redraw_screen(struct window_pane *);
-void	window_choose_write_line(struct window_pane *,
-	    struct screen_write_ctx *, u_int);
+static void	window_choose_fire_callback(struct window_pane *,
+		    struct window_choose_data *);
+static void	window_choose_redraw_screen(struct window_pane *);
+static void	window_choose_write_line(struct window_pane *,
+		    struct screen_write_ctx *, u_int);
 
-void	window_choose_scroll_up(struct window_pane *);
-void	window_choose_scroll_down(struct window_pane *);
+static void	window_choose_scroll_up(struct window_pane *);
+static void	window_choose_scroll_down(struct window_pane *);
 
-void	window_choose_collapse(struct window_pane *, struct session *, u_int);
-void	window_choose_expand(struct window_pane *, struct session *, u_int);
+static void	window_choose_collapse(struct window_pane *, struct session *,
+		    u_int);
+static void	window_choose_expand(struct window_pane *, struct session *,
+		    u_int);
+static void	window_choose_collapse_all(struct window_pane *);
+
+static void	window_choose_data_free(struct window_choose_data *);
 
 enum window_choose_input_type {
 	WINDOW_CHOOSE_NORMAL = -1,
@@ -53,10 +57,10 @@ enum window_choose_input_type {
 };
 
 const struct window_mode window_choose_mode = {
-	window_choose_init,
-	window_choose_free,
-	window_choose_resize,
-	window_choose_key,
+	.init = window_choose_init,
+	.free = window_choose_free,
+	.resize = window_choose_resize,
+	.key = window_choose_key,
 };
 
 struct window_choose_mode_item {
@@ -72,8 +76,11 @@ struct window_choose_mode_data {
 
 	struct mode_key_data	mdata;
 
-	ARRAY_DECL(, struct window_choose_mode_item) list;
-	ARRAY_DECL(, struct window_choose_mode_item) old_list;
+	struct window_choose_mode_item *list;
+	u_int			list_size;
+	struct window_choose_mode_item *old_list;
+	u_int			old_list_size;
+
 	int			width;
 	u_int			top;
 	u_int			selected;
@@ -84,29 +91,32 @@ struct window_choose_mode_data {
 	void 			(*callbackfn)(struct window_choose_data *);
 };
 
-void	window_choose_free1(struct window_choose_mode_data *);
-int     window_choose_key_index(struct window_choose_mode_data *, u_int);
-int     window_choose_index_key(struct window_choose_mode_data *, key_code);
-void	window_choose_prompt_input(enum window_choose_input_type,
-	    const char *, struct window_pane *, key_code);
-void	window_choose_reset_top(struct window_pane *, u_int);
+static void	window_choose_free1(struct window_choose_mode_data *);
+static int	window_choose_key_index(struct window_choose_mode_data *,
+		    u_int);
+static int	window_choose_index_key(struct window_choose_mode_data *,
+		    key_code);
+static void	window_choose_prompt_input(enum window_choose_input_type,
+		    const char *, struct window_pane *, key_code);
+static void	window_choose_reset_top(struct window_pane *, u_int);
 
 void
 window_choose_add(struct window_pane *wp, struct window_choose_data *wcd)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
 	struct window_choose_mode_item	*item;
-	char				 tmp[10];
+	char				 tmp[11];
 
-	ARRAY_EXPAND(&data->list, 1);
-	item = &ARRAY_LAST(&data->list);
+	data->list = xreallocarray(data->list, data->list_size + 1,
+	    sizeof *data->list);
+	item = &data->list[data->list_size++];
 
 	item->name = format_expand(wcd->ft, wcd->ft_template);
 	item->wcd = wcd;
-	item->pos = ARRAY_LENGTH(&data->list) - 1;
+	item->pos = data->list_size - 1;
 	item->state = 0;
 
-	data->width = xsnprintf(tmp, sizeof tmp , "%d", item->pos);
+	data->width = xsnprintf(tmp, sizeof tmp, "%d", item->pos);
 }
 
 void
@@ -119,7 +129,7 @@ window_choose_set_current(struct window_pane *wp, u_int cur)
 	window_choose_reset_top(wp, screen_size_y(s));
 }
 
-void
+static void
 window_choose_reset_top(struct window_pane *wp, u_int sy)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
@@ -136,33 +146,43 @@ window_choose_ready(struct window_pane *wp, u_int cur,
     void (*callbackfn)(struct window_choose_data *))
 {
 	struct window_choose_mode_data	*data = wp->modedata;
+	u_int				 size;
 
 	data->callbackfn = callbackfn;
 	if (data->callbackfn == NULL)
 		data->callbackfn = window_choose_default_callback;
 
-	ARRAY_CONCAT(&data->old_list, &data->list);
+	size = data->old_list_size;
+	data->old_list_size += data->list_size;
+	data->old_list = xreallocarray(data->old_list, data->old_list_size,
+	    sizeof *data->old_list);
+	memcpy(data->old_list + size, data->list, data->list_size *
+	    sizeof *data->list);
 
 	window_choose_set_current(wp, cur);
 	window_choose_collapse_all(wp);
 }
 
-struct screen *
+static struct screen *
 window_choose_init(struct window_pane *wp)
 {
 	struct window_choose_mode_data	*data;
 	struct screen			*s;
 	int				 keys;
 
-	wp->modedata = data = xmalloc(sizeof *data);
+	wp->modedata = data = xcalloc(1, sizeof *data);
 
 	data->callbackfn = NULL;
 	data->input_type = WINDOW_CHOOSE_NORMAL;
 	data->input_str = xstrdup("");
 	data->input_prompt = NULL;
 
-	ARRAY_INIT(&data->list);
-	ARRAY_INIT(&data->old_list);
+	data->list = NULL;
+	data->list_size = 0;
+
+	data->old_list = NULL;
+	data->old_list_size = 0;
+
 	data->top = 0;
 
 	s = &data->screen;
@@ -205,7 +225,7 @@ window_choose_data_create(int type, struct client *c, struct session *s)
 	return (wcd);
 }
 
-void
+static void
 window_choose_data_free(struct window_choose_data *wcd)
 {
 	server_client_unref(wcd->start_client);
@@ -247,7 +267,7 @@ window_choose_data_run(struct window_choose_data *cdata)
 	cmd_list_free(cmdlist);
 }
 
-void
+static void
 window_choose_default_callback(struct window_choose_data *wcd)
 {
 	if (wcd == NULL)
@@ -258,14 +278,14 @@ window_choose_default_callback(struct window_choose_data *wcd)
 	window_choose_data_run(wcd);
 }
 
-void
+static void
 window_choose_free(struct window_pane *wp)
 {
 	if (wp->modedata != NULL)
 		window_choose_free1(wp->modedata);
 }
 
-void
+static void
 window_choose_free1(struct window_choose_mode_data *data)
 {
 	struct window_choose_mode_item	*item;
@@ -274,20 +294,21 @@ window_choose_free1(struct window_choose_mode_data *data)
 	if (data == NULL)
 		return;
 
-	for (i = 0; i < ARRAY_LENGTH(&data->old_list); i++) {
-		item = &ARRAY_ITEM(&data->old_list, i);
+	for (i = 0; i < data->old_list_size; i++) {
+		item = &data->old_list[i];
 		window_choose_data_free(item->wcd);
 		free(item->name);
 	}
-	ARRAY_FREE(&data->list);
-	ARRAY_FREE(&data->old_list);
+	free(data->list);
+	free(data->old_list);
+
 	free(data->input_str);
 
 	screen_free(&data->screen);
 	free(data);
 }
 
-void
+static void
 window_choose_resize(struct window_pane *wp, u_int sx, u_int sy)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
@@ -298,7 +319,7 @@ window_choose_resize(struct window_pane *wp, u_int sx, u_int sy)
 	window_choose_redraw_screen(wp);
 }
 
-void
+static void
 window_choose_fire_callback(struct window_pane *wp,
     struct window_choose_data *wcd)
 {
@@ -312,7 +333,7 @@ window_choose_fire_callback(struct window_pane *wp,
 	window_choose_free1(data);
 }
 
-void
+static void
 window_choose_prompt_input(enum window_choose_input_type input_type,
     const char *prompt, struct window_pane *wp, key_code key)
 {
@@ -330,18 +351,15 @@ window_choose_prompt_input(enum window_choose_input_type input_type,
 	window_choose_redraw_screen(wp);
 }
 
-void
+static void
 window_choose_collapse(struct window_pane *wp, struct session *s, u_int pos)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
-	struct window_choose_mode_item	*item, *chosen;
+	struct window_choose_mode_item	*item, *chosen, *copy = NULL;
 	struct window_choose_data	*wcd;
-	u_int				 i;
+	u_int				 i, copy_size = 0;
 
-	ARRAY_DECL(, struct window_choose_mode_item) list_copy;
-	ARRAY_INIT(&list_copy);
-
-	chosen = &ARRAY_ITEM(&data->list, pos);
+	chosen = &data->list[pos];
 	chosen->state &= ~TREE_EXPANDED;
 
 	/*
@@ -349,15 +367,19 @@ window_choose_collapse(struct window_pane *wp, struct session *s, u_int pos)
 	 * assign the actual result we want to render and copy the new one over
 	 * the top of it.
 	 */
-	for (i = 0; i < ARRAY_LENGTH(&data->list); i++) {
-		item = &ARRAY_ITEM(&data->list, i);
+	for (i = 0; i < data->list_size; i++) {
+		item = &data->list[i];
 		wcd = item->wcd;
 
 		if (s == wcd->tree_session) {
 			/* We only show the session when collapsed. */
 			if (wcd->type & TREE_SESSION) {
 				item->state &= ~TREE_EXPANDED;
-				ARRAY_ADD(&list_copy, *item);
+
+				copy = xreallocarray(copy, copy_size + 1,
+				    sizeof *copy);
+				memcpy(&copy[copy_size], item, sizeof *copy);
+				copy_size++;
 
 				/*
 				 * Update the selection to this session item so
@@ -366,18 +388,21 @@ window_choose_collapse(struct window_pane *wp, struct session *s, u_int pos)
 				 */
 				data->selected = i;
 			}
-		} else
-			ARRAY_ADD(&list_copy, ARRAY_ITEM(&data->list, i));
+		} else {
+			copy = xreallocarray(copy, copy_size + 1, sizeof *copy);
+			memcpy(&copy[copy_size], item, sizeof *copy);
+			copy_size++;
+		}
 	}
 
-	if (!ARRAY_EMPTY(&list_copy)) {
-		ARRAY_FREE(&data->list);
-		ARRAY_CONCAT(&data->list, &list_copy);
-		ARRAY_FREE(&list_copy);
+	if (copy_size != 0) {
+		free(data->list);
+		data->list = copy;
+		data->list_size = copy_size;
 	}
 }
 
-void
+static void
 window_choose_collapse_all(struct window_pane *wp)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
@@ -386,14 +411,14 @@ window_choose_collapse_all(struct window_pane *wp)
 	struct session			*s, *chosen;
 	u_int				 i;
 
-	chosen = ARRAY_ITEM(&data->list, data->selected).wcd->start_session;
+	chosen = data->list[data->selected].wcd->start_session;
 
 	RB_FOREACH(s, sessions, &sessions)
 		window_choose_collapse(wp, s, data->selected);
 
 	/* Reset the selection back to the starting session. */
-	for (i = 0; i < ARRAY_LENGTH(&data->list); i++) {
-		item = &ARRAY_ITEM(&data->list, i);
+	for (i = 0; i < data->list_size; i++) {
+		item = &data->list[i];
 
 		if (chosen != item->wcd->tree_session)
 			continue;
@@ -414,8 +439,8 @@ window_choose_expand_all(struct window_pane *wp)
 	u_int				 i;
 
 	RB_FOREACH(s, sessions, &sessions) {
-		for (i = 0; i < ARRAY_LENGTH(&data->list); i++) {
-			item = &ARRAY_ITEM(&data->list, i);
+		for (i = 0; i < data->list_size; i++) {
+			item = &data->list[i];
 
 			if (s != item->wcd->tree_session)
 				continue;
@@ -428,7 +453,7 @@ window_choose_expand_all(struct window_pane *wp)
 	window_choose_reset_top(wp, screen_size_y(scr));
 }
 
-void
+static void
 window_choose_expand(struct window_pane *wp, struct session *s, u_int pos)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
@@ -436,8 +461,8 @@ window_choose_expand(struct window_pane *wp, struct session *s, u_int pos)
 	struct window_choose_data	*wcd;
 	u_int				 i, items;
 
-	chosen = &ARRAY_ITEM(&data->list, pos);
-	items = ARRAY_LENGTH(&data->old_list) - 1;
+	chosen = &data->list[pos];
+	items = data->old_list_size - 1;
 
 	/* It's not possible to expand anything other than sessions. */
 	if (!(chosen->wcd->type & TREE_SESSION))
@@ -456,7 +481,7 @@ window_choose_expand(struct window_pane *wp, struct session *s, u_int pos)
 	 * to expand.
 	 */
 	for (i = items; i > 0; i--) {
-		item = &ARRAY_ITEM(&data->old_list, i);
+		item = &data->old_list[i];
 		item->state |= TREE_EXPANDED;
 		wcd = item->wcd;
 
@@ -473,23 +498,34 @@ window_choose_expand(struct window_pane *wp, struct session *s, u_int pos)
 				 * entries in order *AFTER* the selected
 				 * session.
 				 */
-				if (pos < i ) {
-					ARRAY_INSERT(&data->list,
-					    pos + 1,
-					    ARRAY_ITEM(&data->old_list,
-					    i));
+				if (pos < i) {
+					data->list = xreallocarray(data->list,
+					    data->list_size + 1,
+					    sizeof *data->list);
+					memmove(&data->list[pos + 2],
+					    &data->list[pos + 1],
+					    (data->list_size - (pos + 1)) *
+					    sizeof *data->list);
+					memcpy(&data->list[pos + 1],
+					    &data->old_list[i],
+					    sizeof *data->list);
+					data->list_size++;
 				} else {
 					/* Ran out of room, add to the end. */
-					ARRAY_ADD(&data->list,
-					    ARRAY_ITEM(&data->old_list,
-					    i));
+					data->list = xreallocarray(data->list,
+					    data->list_size + 1,
+					    sizeof *data->list);
+					memcpy(&data->list[data->list_size],
+					    &data->old_list[i],
+					    sizeof *data->list);
+					data->list_size++;
 				}
 			}
 		}
 	}
 }
 
-struct window_choose_mode_item *
+static struct window_choose_mode_item *
 window_choose_get_item(struct window_pane *wp, key_code key,
     struct mouse_event *m)
 {
@@ -497,18 +533,18 @@ window_choose_get_item(struct window_pane *wp, key_code key,
 	u_int				 x, y, idx;
 
 	if (!KEYC_IS_MOUSE(key))
-		return (&ARRAY_ITEM(&data->list, data->selected));
+		return (&data->list[data->selected]);
 
 	if (cmd_mouse_at(wp, m, &x, &y, 0) != 0)
 		return (NULL);
 
 	idx = data->top + y;
-	if (idx >= ARRAY_LENGTH(&data->list))
+	if (idx >= data->list_size)
 		return (NULL);
-	return (&ARRAY_ITEM(&data->list, idx));
+	return (&data->list[idx]);
 }
 
-void
+static void
 window_choose_key(struct window_pane *wp, __unused struct client *c,
     __unused struct session *sess, key_code key, struct mouse_event *m)
 {
@@ -520,10 +556,10 @@ window_choose_key(struct window_pane *wp, __unused struct client *c,
 	u_int				 items, n;
 	int				 idx;
 
-	items = ARRAY_LENGTH(&data->list);
+	items = data->list_size;
 
 	if (data->input_type == WINDOW_CHOOSE_GOTO_ITEM) {
-		switch (mode_key_lookup(&data->mdata, key, NULL)) {
+		switch (mode_key_lookup(&data->mdata, key)) {
 		case MODEKEYCHOICE_CANCEL:
 			data->input_type = WINDOW_CHOOSE_NORMAL;
 			window_choose_redraw_screen(wp);
@@ -535,8 +571,7 @@ window_choose_key(struct window_pane *wp, __unused struct client *c,
 				window_choose_redraw_screen(wp);
 				break;
 			}
-			item = &ARRAY_ITEM(&data->list, n);
-			window_choose_fire_callback(wp, item->wcd);
+			window_choose_fire_callback(wp, data->list[n].wcd);
 			break;
 		case MODEKEYCHOICE_BACKSPACE:
 			input_len = strlen(data->input_str);
@@ -554,7 +589,7 @@ window_choose_key(struct window_pane *wp, __unused struct client *c,
 		return;
 	}
 
-	switch (mode_key_lookup(&data->mdata, key, NULL)) {
+	switch (mode_key_lookup(&data->mdata, key)) {
 	case MODEKEYCHOICE_CANCEL:
 		window_choose_fire_callback(wp, NULL);
 		break;
@@ -733,17 +768,15 @@ window_choose_key(struct window_pane *wp, __unused struct client *c,
 		break;
 	default:
 		idx = window_choose_index_key(data, key);
-		if (idx < 0 || (u_int) idx >= ARRAY_LENGTH(&data->list))
+		if (idx < 0 || (u_int) idx >= data->list_size)
 			break;
 		data->selected = idx;
-
-		item = &ARRAY_ITEM(&data->list, data->selected);
-		window_choose_fire_callback(wp, item->wcd);
+		window_choose_fire_callback(wp, data->list[idx].wcd);
 		break;
 	}
 }
 
-void
+static void
 window_choose_write_line(struct window_pane *wp, struct screen_write_ctx *ctx,
     u_int py)
 {
@@ -765,8 +798,8 @@ window_choose_write_line(struct window_pane *wp, struct screen_write_ctx *ctx,
 		style_apply(&gc, oo, "mode-style");
 
 	screen_write_cursormove(ctx, 0, py);
-	if (data->top + py  < ARRAY_LENGTH(&data->list)) {
-		item = &ARRAY_ITEM(&data->list, data->top + py);
+	if (data->top + py  < data->list_size) {
+		item = &data->list[data->top + py];
 		if (item->wcd->wl != NULL &&
 		    item->wcd->wl->flags & WINLINK_ALERTFLAGS)
 			gc.attr |= GRID_ATTR_BRIGHT;
@@ -801,7 +834,7 @@ window_choose_write_line(struct window_pane *wp, struct screen_write_ctx *ctx,
 
 }
 
-int
+static int
 window_choose_key_index(struct window_choose_mode_data *data, u_int idx)
 {
 	static const char	keys[] = "0123456789"
@@ -811,7 +844,7 @@ window_choose_key_index(struct window_choose_mode_data *data, u_int idx)
 	int			mkey;
 
 	for (ptr = keys; *ptr != '\0'; ptr++) {
-		mkey = mode_key_lookup(&data->mdata, *ptr, NULL);
+		mkey = mode_key_lookup(&data->mdata, *ptr);
 		if (mkey != MODEKEY_NONE && mkey != MODEKEY_OTHER)
 			continue;
 		if (idx-- == 0)
@@ -820,7 +853,7 @@ window_choose_key_index(struct window_choose_mode_data *data, u_int idx)
 	return (-1);
 }
 
-int
+static int
 window_choose_index_key(struct window_choose_mode_data *data, key_code key)
 {
 	static const char	keys[] = "0123456789"
@@ -831,7 +864,7 @@ window_choose_index_key(struct window_choose_mode_data *data, key_code key)
 	u_int			idx = 0;
 
 	for (ptr = keys; *ptr != '\0'; ptr++) {
-		mkey = mode_key_lookup(&data->mdata, *ptr, NULL);
+		mkey = mode_key_lookup(&data->mdata, *ptr);
 		if (mkey != MODEKEY_NONE && mkey != MODEKEY_OTHER)
 			continue;
 		if (key == (key_code)*ptr)
@@ -841,7 +874,7 @@ window_choose_index_key(struct window_choose_mode_data *data, key_code key)
 	return (-1);
 }
 
-void
+static void
 window_choose_redraw_screen(struct window_pane *wp)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
@@ -855,7 +888,7 @@ window_choose_redraw_screen(struct window_pane *wp)
 	screen_write_stop(&ctx);
 }
 
-void
+static void
 window_choose_scroll_up(struct window_pane *wp)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
@@ -867,27 +900,27 @@ window_choose_scroll_up(struct window_pane *wp)
 
 	screen_write_start(&ctx, wp, NULL);
 	screen_write_cursormove(&ctx, 0, 0);
-	screen_write_insertline(&ctx, 1);
+	screen_write_insertline(&ctx, 1, 8);
 	window_choose_write_line(wp, &ctx, 0);
 	if (screen_size_y(&data->screen) > 1)
 		window_choose_write_line(wp, &ctx, 1);
 	screen_write_stop(&ctx);
 }
 
-void
+static void
 window_choose_scroll_down(struct window_pane *wp)
 {
 	struct window_choose_mode_data	*data = wp->modedata;
 	struct screen			*s = &data->screen;
 	struct screen_write_ctx		 ctx;
 
-	if (data->top >= ARRAY_LENGTH(&data->list))
+	if (data->top >= data->list_size)
 		return;
 	data->top++;
 
 	screen_write_start(&ctx, wp, NULL);
 	screen_write_cursormove(&ctx, 0, 0);
-	screen_write_deleteline(&ctx, 1);
+	screen_write_deleteline(&ctx, 1, 8);
 	window_choose_write_line(wp, &ctx, screen_size_y(s) - 1);
 	if (screen_size_y(&data->screen) > 1)
 		window_choose_write_line(wp, &ctx, screen_size_y(s) - 2);

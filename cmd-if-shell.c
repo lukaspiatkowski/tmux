@@ -29,11 +29,11 @@
  * Executes a tmux command if a shell command returns true or false.
  */
 
-enum cmd_retval	 cmd_if_shell_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	 cmd_if_shell_exec(struct cmd *, struct cmd_q *);
 
-void	cmd_if_shell_callback(struct job *);
-void	cmd_if_shell_done(struct cmd_q *);
-void	cmd_if_shell_free(void *);
+static void	cmd_if_shell_callback(struct job *);
+static void	cmd_if_shell_done(struct cmd_q *);
+static void	cmd_if_shell_free(void *);
 
 const struct cmd_entry cmd_if_shell_entry = {
 	.name = "if-shell",
@@ -50,6 +50,9 @@ const struct cmd_entry cmd_if_shell_entry = {
 };
 
 struct cmd_if_shell_data {
+	char			*file;
+	u_int			 line;
+
 	char			*cmd_if;
 	char			*cmd_else;
 
@@ -60,7 +63,7 @@ struct cmd_if_shell_data {
 	int			 references;
 };
 
-enum cmd_retval
+static enum cmd_retval
 cmd_if_shell_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args			*args = self->args;
@@ -73,16 +76,15 @@ cmd_if_shell_exec(struct cmd *self, struct cmd_q *cmdq)
 	struct format_tree		*ft;
 	const char			*cwd;
 
-	cwd = wp->cwd;
-
 	if (cmdq->client != NULL && cmdq->client->session == NULL)
 		cwd = cmdq->client->cwd;
 	else if (s != NULL)
 		cwd = s->cwd;
 	else
 		cwd = NULL;
+
 	ft = format_create(cmdq, 0);
-	format_defaults(ft, NULL, s, wl, wp);
+	format_defaults(ft, cmdq->state.c, s, wl, wp);
 	shellcmd = format_expand(ft, args->argv[0]);
 	format_free(ft);
 
@@ -107,7 +109,11 @@ cmd_if_shell_exec(struct cmd *self, struct cmd_q *cmdq)
 		return (CMD_RETURN_NORMAL);
 	}
 
-	cdata = xmalloc(sizeof *cdata);
+	cdata = xcalloc(1, sizeof *cdata);
+	if (self->file != NULL) {
+		cdata->file = xstrdup(self->file);
+		cdata->line = self->line;
+	}
 
 	cdata->cmd_if = xstrdup(args->argv[1]);
 	if (args->argc == 3)
@@ -131,7 +137,7 @@ cmd_if_shell_exec(struct cmd *self, struct cmd_q *cmdq)
 	return (CMD_RETURN_WAIT);
 }
 
-void
+static void
 cmd_if_shell_callback(struct job *job)
 {
 	struct cmd_if_shell_data	*cdata = job->data;
@@ -149,7 +155,8 @@ cmd_if_shell_callback(struct job *job)
 	if (cmd == NULL)
 		return;
 
-	if (cmd_string_parse(cmd, &cmdlist, NULL, 0, &cause) != 0) {
+	if (cmd_string_parse(cmd, &cmdlist, cdata->file, cdata->line,
+	    &cause) != 0) {
 		if (cause != NULL) {
 			cmdq_error(cmdq, "%s", cause);
 			free(cause);
@@ -166,7 +173,7 @@ cmd_if_shell_callback(struct job *job)
 	cmd_list_free(cmdlist);
 }
 
-void
+static void
 cmd_if_shell_done(struct cmd_q *cmdq1)
 {
 	struct cmd_if_shell_data	*cdata = cmdq1->data;
@@ -184,10 +191,12 @@ cmd_if_shell_done(struct cmd_q *cmdq1)
 
 	free(cdata->cmd_else);
 	free(cdata->cmd_if);
+
+	free(cdata->file);
 	free(cdata);
 }
 
-void
+static void
 cmd_if_shell_free(void *data)
 {
 	struct cmd_if_shell_data	*cdata = data;
@@ -201,5 +210,7 @@ cmd_if_shell_free(void *data)
 
 	free(cdata->cmd_else);
 	free(cdata->cmd_if);
+
+	free(cdata->file);
 	free(cdata);
 }

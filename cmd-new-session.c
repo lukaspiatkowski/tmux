@@ -33,7 +33,7 @@
 
 #define NEW_SESSION_TEMPLATE "#{session_name}:"
 
-enum cmd_retval	 cmd_new_session_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	 cmd_new_session_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_new_session_entry = {
 	.name = "new-session",
@@ -63,12 +63,12 @@ const struct cmd_entry cmd_has_session_entry = {
 	.exec = cmd_new_session_exec
 };
 
-enum cmd_retval
+static enum cmd_retval
 cmd_new_session_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args		*args = self->args;
 	struct client		*c = cmdq->client;
-	struct session		*s, *attach_sess;
+	struct session		*s, *as;
 	struct session		*groupwith = cmdq->state.tflag.s;
 	struct window		*w;
 	struct environ		*env;
@@ -80,6 +80,7 @@ cmd_new_session_exec(struct cmd *self, struct cmd_q *cmdq)
 	u_int			 sx, sy;
 	struct format_tree	*ft;
 	struct environ_entry	*envent;
+	struct cmd_find_state	 fs;
 
 	if (self->entry == &cmd_has_session_entry) {
 		/*
@@ -100,7 +101,7 @@ cmd_new_session_exec(struct cmd *self, struct cmd_q *cmdq)
 			cmdq_error(cmdq, "bad session name: %s", newname);
 			return (CMD_RETURN_ERROR);
 		}
-		if ((attach_sess = session_find(newname)) != NULL) {
+		if ((as = session_find(newname)) != NULL) {
 			if (args_has(args, 'A')) {
 				/*
 				 * This cmdq is now destined for
@@ -108,7 +109,7 @@ cmd_new_session_exec(struct cmd *self, struct cmd_q *cmdq)
 				 * will have already been prepared, copy this
 				 * session into its tflag so it can be used.
 				 */
-				cmdq->state.tflag.s = attach_sess;
+				cmd_find_from_session(&cmdq->state.tflag, as);
 				return (cmd_attach_session(cmdq,
 				    args_has(args, 'D'), 0, NULL,
 				    args_has(args, 'E')));
@@ -142,7 +143,7 @@ cmd_new_session_exec(struct cmd *self, struct cmd_q *cmdq)
 		format_defaults(ft, c, NULL, NULL, NULL);
 		to_free = cwd = format_expand(ft, args_get(args, 'c'));
 		format_free(ft);
-	} else if (c != NULL && c->session == NULL)
+	} else if (c != NULL && c->session == NULL && c->cwd != NULL)
 		cwd = c->cwd;
 	else
 		cwd = ".";
@@ -315,6 +316,10 @@ cmd_new_session_exec(struct cmd *self, struct cmd_q *cmdq)
 
 	if (to_free != NULL)
 		free((void *)to_free);
+
+	cmd_find_from_session(&fs, s);
+	if (hooks_wait(s->hooks, cmdq, &fs, "after-new-session") == 0)
+		return (CMD_RETURN_WAIT);
 	return (CMD_RETURN_NORMAL);
 
 error:

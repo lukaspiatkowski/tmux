@@ -28,14 +28,14 @@
 
 #define BREAK_PANE_TEMPLATE "#{session_name}:#{window_index}.#{pane_index}"
 
-enum cmd_retval	 cmd_break_pane_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	 cmd_break_pane_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_break_pane_entry = {
 	.name = "break-pane",
 	.alias = "breakp",
 
 	.args = { "dPF:s:t:", 0, 0 },
-	.usage = "[-dP] [-F format] " CMD_SRCDST_PANE_USAGE,
+	.usage = "[-dP] [-F format] [-s src-pane] [-t dst-window]",
 
 	.sflag = CMD_PANE,
 	.tflag = CMD_WINDOW_INDEX,
@@ -44,7 +44,7 @@ const struct cmd_entry cmd_break_pane_entry = {
 	.exec = cmd_break_pane_exec
 };
 
-enum cmd_retval
+static enum cmd_retval
 cmd_break_pane_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args		*args = self->args;

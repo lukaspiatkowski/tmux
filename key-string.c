@@ -25,7 +25,7 @@
 static key_code	key_string_search_table(const char *);
 static key_code	key_string_get_modifiers(const char **);
 
-const struct {
+static const struct {
 	const char     *string;
 	key_code	key;
 } key_string_table[] = {
@@ -93,8 +93,17 @@ const struct {
 	KEYC_MOUSE_STRING(MOUSEDRAG1, MouseDrag1),
 	KEYC_MOUSE_STRING(MOUSEDRAG2, MouseDrag2),
 	KEYC_MOUSE_STRING(MOUSEDRAG3, MouseDrag3),
+	KEYC_MOUSE_STRING(MOUSEDRAGEND1, MouseDragEnd1),
+	KEYC_MOUSE_STRING(MOUSEDRAGEND2, MouseDragEnd2),
+	KEYC_MOUSE_STRING(MOUSEDRAGEND3, MouseDragEnd3),
 	KEYC_MOUSE_STRING(WHEELUP, WheelUp),
 	KEYC_MOUSE_STRING(WHEELDOWN, WheelDown),
+	KEYC_MOUSE_STRING(DOUBLECLICK1, DoubleClick1),
+	KEYC_MOUSE_STRING(DOUBLECLICK2, DoubleClick2),
+	KEYC_MOUSE_STRING(DOUBLECLICK3, DoubleClick3),
+	KEYC_MOUSE_STRING(TRIPLECLICK1, TripleClick1),
+	KEYC_MOUSE_STRING(TRIPLECLICK2, TripleClick2),
+	KEYC_MOUSE_STRING(TRIPLECLICK3, TripleClick3),
 };
 
 /* Find key string in table. */
@@ -143,12 +152,12 @@ key_string_lookup_string(const char *string)
 {
 	static const char	*other = "!#()+,-.0123456789:;<=>?'\r\t";
 	key_code		 key;
-	u_short			 u;
-	int			 size;
+	u_int			 u;
 	key_code		 modifiers;
 	struct utf8_data	 ud;
 	u_int			 i;
 	enum utf8_state		 more;
+	wchar_t			 wc;
 
 	/* Is this no key? */
 	if (strcasecmp(string, "None") == 0)
@@ -156,7 +165,9 @@ key_string_lookup_string(const char *string)
 
 	/* Is this a hexadecimal value? */
 	if (string[0] == '0' && string[1] == 'x') {
-	        if (sscanf(string + 2, "%hx%n", &u, &size) != 1 || size > 4)
+	        if (sscanf(string + 2, "%x", &u) != 1)
+	                return (KEYC_UNKNOWN);
+		if (u > 0x1fffff)
 	                return (KEYC_UNKNOWN);
 	        return (u);
 	}
@@ -185,8 +196,9 @@ key_string_lookup_string(const char *string)
 				more = utf8_append(&ud, (u_char)string[i]);
 			if (more != UTF8_DONE)
 				return (KEYC_UNKNOWN);
-			key = utf8_combine(&ud);
-			return (key | modifiers);
+			if (utf8_combine(&ud, &wc) != UTF8_DONE)
+				return (KEYC_UNKNOWN);
+			return (wc | modifiers);
 		}
 
 		/* Otherwise look the key up in the table. */
@@ -221,6 +233,7 @@ key_string_lookup_key(key_code key)
 	char			tmp[8];
 	u_int			i;
 	struct utf8_data	ud;
+	size_t			off;
 
 	*out = '\0';
 
@@ -265,8 +278,9 @@ key_string_lookup_key(key_code key)
 	/* Is this a UTF-8 key? */
 	if (key > 127 && key < KEYC_BASE) {
 		if (utf8_split(key, &ud) == UTF8_DONE) {
-			memcpy(out, ud.data, ud.size);
-			out[ud.size] = '\0';
+			off = strlen(out);
+			memcpy(out + off, ud.data, ud.size);
+			out[off + ud.size] = '\0';
 			return (out);
 		}
 	}

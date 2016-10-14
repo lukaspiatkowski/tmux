@@ -26,7 +26,7 @@
  * Move a window.
  */
 
-enum cmd_retval	 cmd_move_window_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	 cmd_move_window_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_move_window_entry = {
 	.name = "move-window",
@@ -56,7 +56,7 @@ const struct cmd_entry cmd_link_window_entry = {
 	.exec = cmd_move_window_exec
 };
 
-enum cmd_retval
+static enum cmd_retval
 cmd_move_window_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args	*args = self->args;
@@ -65,9 +65,6 @@ cmd_move_window_exec(struct cmd *self, struct cmd_q *cmdq)
 	struct winlink	*wl = cmdq->state.sflag.wl;
 	char		*cause;
 	int		 idx = cmdq->state.tflag.idx, kflag, dflag, sflag;
-
-	kflag = args_has(self->args, 'k');
-	dflag = args_has(self->args, 'd');
 
 	if (args_has(args, 'r')) {
 		session_renumber_windows(dst);

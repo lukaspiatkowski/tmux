@@ -1,7 +1,5 @@
-/* $OpenBSD$ */
-
 /*
- * Copyright (c) 2009 Nicholas Marriott <nicholas.marriott@gmail.com>
+ * Copyright (c) 2016 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -18,38 +16,36 @@
 
 #include <sys/types.h>
 
+#include <string.h>
+
 #include "tmux.h"
 
-/*
- * Clear pane history.
- */
+#if defined(HAVE_PRCTL) && defined(HAVE_PR_SET_NAME)
 
-static enum cmd_retval	 cmd_clear_history_exec(struct cmd *, struct cmd_q *);
+#include <sys/prctl.h>
 
-const struct cmd_entry cmd_clear_history_entry = {
-	.name = "clear-history",
-	.alias = "clearhist",
-
-	.args = { "t:", 0, 0 },
-	.usage = CMD_TARGET_PANE_USAGE,
-
-	.tflag = CMD_PANE,
-
-	.flags = 0,
-	.exec = cmd_clear_history_exec
-};
-
-static enum cmd_retval
-cmd_clear_history_exec(__unused struct cmd *self, struct cmd_q *cmdq)
+void
+setproctitle(const char *fmt, ...)
 {
-	struct window_pane	*wp = cmdq->state.tflag.wp;
-	struct grid		*gd;
+	char	title[16], name[16], *cp;
+	va_list	ap;
+	int	used;
 
-	gd = cmdq->state.tflag.wp->base.grid;
+	va_start(ap, fmt);
+	vsnprintf(title, sizeof title, fmt, ap);
+	va_end(ap);
 
-	if (wp->mode == &window_copy_mode)
-		window_pane_reset_mode(wp);
-	grid_clear_history(gd);
-
-	return (CMD_RETURN_NORMAL);
+	used = snprintf(name, sizeof name, "%s: %s", getprogname(), title);
+	if (used >= (int)sizeof name) {
+		cp = strrchr(name, ' ');
+		if (cp != NULL)
+			*cp = '\0';
+	}
+	prctl(PR_SET_NAME, name);
 }
+#else
+void
+setproctitle(const char *fmt, ...)
+{
+}
+#endif

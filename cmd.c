@@ -455,12 +455,15 @@ cmd_prepare_state_flag(char c, const char *target, enum cmd_entry_flag flag,
 			current = &parent->state.tflag;
 		else if (c == 's')
 			current = &parent->state.sflag;
-	} else {
+	}
+	if (current == NULL || !cmd_find_valid_state(current)) {
 		error = cmd_find_current(&tmp, cmdq, targetflags);
 		if (error != 0 && ~targetflags & CMD_FIND_QUIET)
 			return (-1);
 		current = &tmp;
 	}
+	if (!cmd_find_empty_state(current) && !cmd_find_valid_state(current))
+		fatalx("invalid current state");
 
 	switch (flag) {
 	case CMD_NONE:
@@ -481,7 +484,6 @@ cmd_prepare_state_flag(char c, const char *target, enum cmd_entry_flag flag,
 		    CMD_FIND_SESSION, CMD_FIND_QUIET);
 		if (error == 0)
 			break;
-		flag = CMD_WINDOW_INDEX;
 		/* FALLTHROUGH */
 	case CMD_WINDOW:
 	case CMD_WINDOW_CANFAIL:
@@ -558,6 +560,13 @@ cmd_prepare_state(struct cmd *cmd, struct cmd_q *cmdq, struct cmd_q *parent)
 	if (error != 0)
 		return (error);
 
+	if (!cmd_find_empty_state(&state->tflag) &&
+	    !cmd_find_valid_state(&state->tflag))
+		fatalx("invalid -t state");
+	if (!cmd_find_empty_state(&state->sflag) &&
+	    !cmd_find_valid_state(&state->sflag))
+		fatalx("invalid -s state");
+
 	return (0);
 }
 
@@ -601,8 +610,10 @@ cmd_mouse_at(struct window_pane *wp, struct mouse_event *m, u_int *xp,
 	if (y < wp->yoff || y >= wp->yoff + wp->sy)
 		return (-1);
 
-	*xp = x - wp->xoff;
-	*yp = y - wp->yoff;
+	if (xp != NULL)
+		*xp = x - wp->xoff;
+	if (yp != NULL)
+		*yp = y - wp->yoff;
 	return (0);
 }
 

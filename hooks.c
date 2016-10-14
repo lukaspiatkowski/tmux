@@ -29,8 +29,7 @@ struct hooks {
 };
 
 static int	hooks_cmp(struct hook *, struct hook *);
-RB_PROTOTYPE(hooks_tree, hook, entry, hooks_cmp);
-RB_GENERATE(hooks_tree, hook, entry, hooks_cmp);
+RB_GENERATE_STATIC(hooks_tree, hook, entry, hooks_cmp);
 
 static struct hook	*hooks_find1(struct hooks *, const char *);
 static void		 hooks_free1(struct hooks *, struct hook *);
@@ -196,6 +195,9 @@ hooks_wait(struct hooks *hooks, struct cmd_q *cmdq, struct cmd_find_state *fs,
 	struct cmd_q	*hooks_cmdq;
 	va_list		 ap;
 	char		*name;
+
+	if (cmdq->flags & CMD_Q_NOHOOKS)
+		return (-1);
 
 	va_start(ap, fmt);
 	xvasprintf(&name, fmt, ap);

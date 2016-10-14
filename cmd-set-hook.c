@@ -27,7 +27,7 @@
  * Set or show global or session hooks.
  */
 
-enum cmd_retval cmd_set_hook_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval cmd_set_hook_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_set_hook_entry = {
 	.name = "set-hook",
@@ -36,7 +36,7 @@ const struct cmd_entry cmd_set_hook_entry = {
 	.args = { "gt:u", 1, 2 },
 	.usage = "[-gu] " CMD_TARGET_SESSION_USAGE " hook-name [command]",
 
-	.tflag = CMD_SESSION,
+	.tflag = CMD_SESSION_CANFAIL,
 
 	.flags = 0,
 	.exec = cmd_set_hook_exec
@@ -55,7 +55,7 @@ const struct cmd_entry cmd_show_hooks_entry = {
 	.exec = cmd_set_hook_exec
 };
 
-enum cmd_retval
+static enum cmd_retval
 cmd_set_hook_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args	*args = self->args;
@@ -63,12 +63,21 @@ cmd_set_hook_exec(struct cmd *self, struct cmd_q *cmdq)
 	struct hooks	*hooks;
 	struct hook	*hook;
 	char		*cause, *tmp;
-	const char	*name, *cmd;
+	const char	*name, *cmd, *target;
 
 	if (args_has(args, 'g'))
 		hooks = global_hooks;
-	else
+	else {
+		if (cmdq->state.tflag.s == NULL) {
+			target = args_get(args, 't');
+			if (target != NULL)
+				cmdq_error(cmdq, "no such session: %s", target);
+			else
+				cmdq_error(cmdq, "no current session");
+			return (CMD_RETURN_ERROR);
+		}
 		hooks = cmdq->state.tflag.s->hooks;
+	}
 
 	if (self->entry == &cmd_show_hooks_entry) {
 		hook = hooks_first(hooks);

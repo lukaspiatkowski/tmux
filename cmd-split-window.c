@@ -32,14 +32,14 @@
 
 #define SPLIT_WINDOW_TEMPLATE "#{session_name}:#{window_index}.#{pane_index}"
 
-enum cmd_retval	 cmd_split_window_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	 cmd_split_window_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_split_window_entry = {
 	.name = "split-window",
 	.alias = "splitw",
 
-	.args = { "bc:dF:l:hp:Pt:v", 0, -1 },
-	.usage = "[-bdhvP] [-c start-directory] [-F format] "
+	.args = { "bc:dfF:l:hp:Pt:v", 0, -1 },
+	.usage = "[-bdfhvP] [-c start-directory] [-F format] "
 		 "[-p percentage|-l size] " CMD_TARGET_PANE_USAGE " [command]",
 
 	.tflag = CMD_PANE,
@@ -48,7 +48,7 @@ const struct cmd_entry cmd_split_window_entry = {
 	.exec = cmd_split_window_exec
 };
 
-enum cmd_retval
+static enum cmd_retval
 cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args		*args = self->args;
@@ -65,6 +65,7 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 	struct layout_cell	*lc;
 	struct format_tree	*ft;
 	struct environ_entry	*envent;
+	struct cmd_find_state    fs;
 
 	server_unzoom_window(w);
 
@@ -130,12 +131,13 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 	if (*shell == '\0' || areshell(shell))
 		shell = _PATH_BSHELL;
 
-	lc = layout_split_pane(wp, type, size, args_has(args, 'b'));
+	lc = layout_split_pane(wp, type, size, args_has(args, 'b'),
+	    args_has(args, 'f'));
 	if (lc == NULL) {
 		cause = xstrdup("pane too small");
 		goto error;
 	}
-	new_wp = window_add_pane(w, hlimit);
+	new_wp = window_add_pane(w, wp, hlimit);
 	layout_assign_pane(lc, new_wp);
 
 	path = NULL;
@@ -178,6 +180,15 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 
 	if (to_free != NULL)
 		free((void *)to_free);
+
+	cmd_find_clear_state(&fs, NULL, 0);
+	fs.s = s;
+	fs.wl = wl;
+	fs.w = w;
+	fs.wp = new_wp;
+	cmd_find_log_state(__func__, &fs);
+	if (hooks_wait(s->hooks, cmdq, &fs, "after-split-window") == 0)
+		return (CMD_RETURN_WAIT);
 	return (CMD_RETURN_NORMAL);
 
 error:

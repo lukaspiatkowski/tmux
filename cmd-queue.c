@@ -26,6 +26,7 @@
 #include "tmux.h"
 
 static enum cmd_retval	cmdq_continue_one(struct cmd_q *);
+static void		cmdq_flush(struct cmd_q *);
 
 /* Create new command queue. */
 struct cmd_q *
@@ -80,7 +81,7 @@ cmdq_print(struct cmd_q *cmdq, const char *fmt, ...)
 		/* nothing */;
 	else if (c->session == NULL || (c->flags & CLIENT_CONTROL)) {
 		if (~c->flags & CLIENT_UTF8) {
-			vasprintf(&tmp, fmt, ap);
+			xvasprintf(&tmp, fmt, ap);
 			msg = utf8_sanitize(tmp);
 			free(tmp);
 			evbuffer_add(c->stdout_data, msg, strlen(msg));
@@ -185,10 +186,12 @@ cmdq_append(struct cmd_q *cmdq, struct cmd_list *cmdlist, struct mouse_event *m)
 static enum cmd_retval
 cmdq_continue_one(struct cmd_q *cmdq)
 {
-	struct cmd	*cmd = cmdq->cmd;
-	enum cmd_retval	 retval;
-	char		*tmp;
-	int		 flags = !!(cmd->flags & CMD_CONTROL);
+	struct cmd		*cmd = cmdq->cmd;
+	enum cmd_retval		 retval;
+	char			*tmp;
+	int			 flags = !!(cmd->flags & CMD_CONTROL);
+	const char		*name;
+	struct cmd_find_state	*fsp, fs;
 
 	tmp = cmd_print(cmd);
 	log_debug("cmdq %p: %s", cmdq, tmp);
@@ -199,12 +202,28 @@ cmdq_continue_one(struct cmd_q *cmdq)
 
 	cmdq_guard(cmdq, "begin", flags);
 
-	if (cmd_prepare_state(cmd, cmdq, NULL) != 0)
+	if (cmd_prepare_state(cmd, cmdq, cmdq->parent) != 0)
 		goto error;
+
 	retval = cmd->entry->exec(cmd, cmdq);
 	if (retval == CMD_RETURN_ERROR)
 		goto error;
 
+	if (~cmd->entry->flags & CMD_AFTERHOOK)
+		goto end;
+
+	if (cmd_find_valid_state(&cmdq->state.tflag))
+		fsp = &cmdq->state.tflag;
+	else {
+		if (cmd_find_current(&fs, cmdq, CMD_FIND_QUIET) != 0)
+			goto end;
+		fsp = &fs;
+	}
+	name = cmd->entry->name;
+	if (hooks_wait(fsp->s->hooks, cmdq, fsp, "after-%s", name) == 0)
+		retval = CMD_RETURN_WAIT;
+
+end:
 	cmdq_guard(cmdq, "end", flags);
 	return (retval);
 
@@ -277,7 +296,7 @@ out:
 }
 
 /* Flush command queue. */
-void
+static void
 cmdq_flush(struct cmd_q *cmdq)
 {
 	struct cmd_q_item	*item, *item1;

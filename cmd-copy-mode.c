@@ -24,7 +24,7 @@
  * Enter copy or clock mode.
  */
 
-enum cmd_retval	 cmd_copy_mode_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	 cmd_copy_mode_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_copy_mode_entry = {
 	.name = "copy-mode",
@@ -52,7 +52,7 @@ const struct cmd_entry cmd_clock_mode_entry = {
 	.exec = cmd_copy_mode_exec
 };
 
-enum cmd_retval
+static enum cmd_retval
 cmd_copy_mode_exec(struct cmd *self, struct cmd_q *cmdq)
 {
 	struct args		*args = self->args;
@@ -83,7 +83,7 @@ cmd_copy_mode_exec(struct cmd *self, struct cmd_q *cmdq)
 		window_copy_start_drag(c, &cmdq->item->mouse);
 	}
 	if (wp->mode == &window_copy_mode && args_has(self->args, 'u'))
-		window_copy_pageup(wp);
+		window_copy_pageup(wp, 0);
 
 	return (CMD_RETURN_NORMAL);
 }
